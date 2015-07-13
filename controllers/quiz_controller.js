@@ -1,104 +1,49 @@
-var models = require('../models/models.js');
+var path = require('path');
 
-// Autoload :id
-exports.load = function(req, res, next, quizId) {
-    models.Quiz.find(quizId).then(
-        function(quiz) {
-            if (quiz) {
-                req.quiz = quiz;
-                next();
-            } else{next(new Error('No existe quizId=' + quizId))}
-        }
-    ).catch(function(error){next(error)});
-};
+// Postgres DATABASE_URL = postgres://user:passwd@host:port/database
+// SQLite   DATABASE_URL = sqlite://:@:/
+var url = process.env.DATABASE_URL.match(/(.*)\:\/\/(.*?)\:(.*)@(.*)\:(.*)\/(.*)/);
+var DB_name  = (url[6]||null);
+var user     = (url[2]||null);
+var pwd      = (url[3]||null);
+var protocol = (url[1]||null);
+var dialect  = (url[1]||null);
+var port     = (url[5]||null);
+var host     = (url[4]||null);
+var storage  = process.env.DATABASE_STORAGE;
 
-// GET /quizes
-exports.index = function(req, res) {
-    models.Quiz.findAll().then(
-        function(quizes) {
-            res.render('quizes/index.ejs', {quizes: quizes, errors: []});
-        }
-    ).catch(function(error){next(error)});
-};
+// Cargar Modelo ORM
+var Sequelize = require('sequelize');
 
-// GET /quizes/:id
-exports.show = function(req, res) {
-    res.render('quizes/show', { quiz: req.quiz, errors: []});
-};            // req.quiz: instancia de quiz cargada con autoload
-
-// GET /quizes/:id/answer
-exports.answer = function(req, res) {
-    var resultado = 'Incorrecto';
-    if (req.query.respuesta === req.quiz.respuesta) {
-        resultado = 'Correcto';
+// Usar BBDD SQLite o Postgres
+var sequelize = new Sequelize(DB_name, user, pwd,
+    {   dialect:  protocol,
+        protocol: protocol,
+        port:     port,
+        host:     host,
+        storage:  storage,  // solo SQLite (.env)
+        omitNull: true      // solo Postgres
     }
-    res.render(
-        'quizes/answer',
-        { quiz: req.quiz,
-            respuesta: resultado,
-            errors: []
-        }
-    );
-};
+);
 
-// GET /quizes/new
-exports.new = function(req, res) {
-    var quiz = models.Quiz.build( // crea objeto quiz
-        {pregunta: "Pregunta", respuesta: "Respuesta"}
-    );
+// Importar definicion de la tabla Quiz
 
-    res.render('quizes/new', {quiz: quiz, errors: []});
-};
+var quiz_path = path.join(__dirname,'quiz');
+var Quiz = sequelize.import(path.join(__dirname,'quiz'));
 
-// POST /quizes/create
-exports.create = function(req, res) {
-    var quiz = models.Quiz.build( req.body.quiz );
+exports.Quiz = Quiz; // exportar definicion de la tabla Quiz
 
-    quiz
-        .validate()
-        .then(
-        function(err){
-            if (err) {
-                res.render('quizes/new', {quiz: quiz, errors: err.errors});
-            } else {
-                quiz // save: guarda en DB campos pregunta y respuesta de quiz
-                    .save({fields: ["pregunta", "respuesta"]})
-                    .then( function(){ res.redirect('/quizes')})
-            }      // res.redirect: Redirección HTTP a lista de preguntas
-        }
-    ).catch(function(error){next(error)});
-};
+// sequelize.sync() inicializa tabla de preguntas en DB
+sequelize.sync().then(function() {
 
-// GET /quizes/:id/edit
-exports.edit = function(req, res) {
-    var quiz = req.quiz;  // req.quiz: autoload de instancia de quiz
-
-    res.render('quizes/edit', {quiz: quiz, errors: []});
-};
-
-// PUT /quizes/:id
-exports.update = function(req, res) {
-    req.quiz.pregunta  = req.body.quiz.pregunta;
-    req.quiz.respuesta = req.body.quiz.respuesta;
-
-    req.quiz
-        .validate()
-        .then(
-        function(err){
-            if (err) {
-                res.render('quizes/edit', {quiz: req.quiz, errors: err.errors});
-            } else {
-                req.quiz     // save: guarda campos pregunta y respuesta en DB
-                    .save( {fields: ["pregunta", "respuesta"]})
-                    .then( function(){ res.redirect('/quizes');});
-            }     // Redirección HTTP a lista de preguntas (URL relativo)
-        }
-    ).catch(function(error){next(error)});
-};
-
-// DELETE /quizes/:id
-exports.destroy = function(req, res) {
-    req.quiz.destroy().then(function () {
-        res.redirect('/quizes');
-    }).catch(function (error) {next(error)});
-};
+    // then(..) ejecuta el manejador una vez creada la tabla
+    Quiz.count().then(function (count){
+        if(count === 0) {   // la tabla se inicializa solo si está vacía
+            Quiz.bulkCreate(
+                [   { pregunta: 'Capital de Italia',   respuesta: 'Roma', tema: 'otro' },
+                    { pregunta: 'Capital de Portugal', respuesta: 'Lisboa', tema: 'otro'}
+                ]
+            ).then(function(){console.log('Base de datos inicializada')});
+        };
+    });
+});
